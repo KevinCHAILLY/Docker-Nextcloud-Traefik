@@ -1,0 +1,74 @@
+## Configuration globale
+global:
+  checkNewVersion: true
+  sendAnonymousUsage: false
+
+## Configuration des logs
+log:
+  level: ${TRAEFIK_LOG_LEVEL}
+
+## Configuration de l'API et du dashboard
+api:
+  dashboard: true
+  insecure: false
+
+## Configuration des providers
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    watch: true
+    network: nextcloud_network_${NEXTCLOUD_HOST}
+  file:
+    directory: "/etc/traefik"
+    watch: true
+
+## Configuration des points d'entrée
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: ":443"
+    http:
+      tls:
+        certResolver: letsencrypt
+
+## Configuration de Let's Encrypt
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: ${TRAEFIK_ACME_EMAIL}
+      storage: /acme.json
+      httpChallenge:
+        entryPoint: web
+
+## Configuration des métriques (optionnel)
+metrics:
+  prometheus: {}
+
+## Configuration du tracing (optionnel)
+tracing:
+  serviceName: "traefik-${NEXTCLOUD_HOST}"
+  spanNameLimit: 100
+
+## Configuration des middlewares par défaut
+http:
+  middlewares:
+    secureHeaders:
+      headers:
+        browserXssFilter: true
+        contentTypeNosniff: true
+        frameDeny: true
+        sslRedirect: true
+        stsIncludeSubdomains: true
+        stsPreload: true
+        stsSeconds: 31536000
+        customFrameOptionsValue: "SAMEORIGIN"
+        customRequestHeaders:
+          X-Forwarded-Proto: "https" 
