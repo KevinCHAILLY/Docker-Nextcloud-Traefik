@@ -1,0 +1,97 @@
+version: '3'
+
+services:
+  traefik:
+    image: traefik:v3.3
+    container_name: traefik-${NEXTCLOUD_HOST}
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      - "${TRAEFIK_DASHBOARD_PORT}:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/acme.json:/acme.json
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+    networks:
+      - nextcloud_network_${NEXTCLOUD_HOST}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-${NEXTCLOUD_HOST}.rule=Host(`${TRAEFIK_DASHBOARD_HOST}`)"
+      - "traefik.http.routers.traefik-${NEXTCLOUD_HOST}.service=api@internal"
+      - "traefik.http.routers.traefik-${NEXTCLOUD_HOST}.entrypoints=websecure"
+      - "traefik.http.routers.traefik-${NEXTCLOUD_HOST}.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik-${NEXTCLOUD_HOST}.middlewares=traefik-auth-${NEXTCLOUD_HOST}"
+      - "traefik.http.middlewares.traefik-auth-${NEXTCLOUD_HOST}.basicauth.users=${TRAEFIK_DASHBOARD_AUTH}"
+
+  db:
+    image: mariadb:10.11
+    container_name: db-${NEXTCLOUD_HOST}
+    restart: always
+    command: --transaction-isolation=READ-COMMITTED
+    volumes:
+      - db_${NEXTCLOUD_HOST}:/var/lib/mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+    networks:
+      - nextcloud_network_${NEXTCLOUD_HOST}
+
+  redis:
+    image: redis:alpine
+    container_name: redis-${NEXTCLOUD_HOST}
+    restart: always
+    networks:
+      - nextcloud_network_${NEXTCLOUD_HOST}
+
+  app:
+    image: nextcloud:apache
+    container_name: nextcloud-${NEXTCLOUD_HOST}
+    restart: always
+    depends_on:
+      - redis
+      - db
+    volumes:
+      - nextcloud_${NEXTCLOUD_HOST}:/var/www/html
+    environment:
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_HOST=db-${NEXTCLOUD_HOST}
+      - REDIS_HOST=redis-${NEXTCLOUD_HOST}
+      - TRUSTED_PROXIES=traefik-${NEXTCLOUD_HOST}
+      - OVERWRITEPROTOCOL=https
+      - OVERWRITEHOST=${NEXTCLOUD_HOST}
+    networks:
+      - nextcloud_network_${NEXTCLOUD_HOST}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nextcloud-${NEXTCLOUD_HOST}.rule=Host(`${NEXTCLOUD_HOST}`)"
+      - "traefik.http.routers.nextcloud-${NEXTCLOUD_HOST}.entrypoints=websecure"
+      - "traefik.http.routers.nextcloud-${NEXTCLOUD_HOST}.tls.certresolver=letsencrypt"
+      - "traefik.http.services.nextcloud-${NEXTCLOUD_HOST}.loadbalancer.server.port=80"
+      # Utilisation du middleware secureHeaders défini dans traefik.yml
+      - "traefik.http.routers.nextcloud-${NEXTCLOUD_HOST}.middlewares=secureHeaders@file,nextcloud-specific-${NEXTCLOUD_HOST},gzip-${NEXTCLOUD_HOST}"
+      # Middlewares spécifiques à Nextcloud
+      - "traefik.http.middlewares.nextcloud-specific-${NEXTCLOUD_HOST}.headers.customResponseHeaders.Strict-Transport-Security=max-age=31536000; includeSubDomains; preload"
+      - "traefik.http.middlewares.nextcloud-specific-${NEXTCLOUD_HOST}.headers.customResponseHeaders.Referrer-Policy=no-referrer"
+      - "traefik.http.middlewares.nextcloud-specific-${NEXTCLOUD_HOST}.headers.customResponseHeaders.X-Content-Type-Options=nosniff"
+      - "traefik.http.middlewares.nextcloud-specific-${NEXTCLOUD_HOST}.headers.customResponseHeaders.X-Frame-Options=SAMEORIGIN"
+      - "traefik.http.middlewares.nextcloud-specific-${NEXTCLOUD_HOST}.headers.customResponseHeaders.X-XSS-Protection=1; mode=block"
+      - "traefik.http.middlewares.gzip-${NEXTCLOUD_HOST}.compress=true"
+      # Redirection HTTP vers HTTPS
+      - "traefik.http.routers.nextcloud-http-${NEXTCLOUD_HOST}.rule=Host(`${NEXTCLOUD_HOST}`)"
+      - "traefik.http.routers.nextcloud-http-${NEXTCLOUD_HOST}.entrypoints=web"
+
+volumes:
+  nextcloud_${NEXTCLOUD_HOST}:
+    name: nextcloud_${NEXTCLOUD_HOST}
+  db_${NEXTCLOUD_HOST}:
+    name: db_${NEXTCLOUD_HOST}
+
+networks:
+  nextcloud_network_${NEXTCLOUD_HOST}:
+    name: nextcloud_network_${NEXTCLOUD_HOST}
+    driver: bridge 
